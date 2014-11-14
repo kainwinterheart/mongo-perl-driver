@@ -1241,12 +1241,19 @@ append_sv (bson_t * bson, const char * in_key, SV *sv, stackette *stack, int is_
         time_t epoch_secs = time(NULL);
         int64_t epoch_ms;
 
-        t.tm_year   = SvIV( perl_mongo_call_reader( sv, "year"    ) ) - 1900;
-        t.tm_mon    = SvIV( perl_mongo_call_reader( sv, "month"   ) ) -    1;
-        t.tm_mday   = SvIV( perl_mongo_call_reader( sv, "day"     ) )       ;
-        t.tm_hour   = SvIV( perl_mongo_call_reader( sv, "hour"    ) )       ;
-        t.tm_min    = SvIV( perl_mongo_call_reader( sv, "minute"  ) )       ;
-        t.tm_sec    = SvIV( perl_mongo_call_reader( sv, "second"  ) )       ;
+        SV * year = perl_mongo_call_reader( sv, "year" );
+        SV * mon = perl_mongo_call_reader( sv, "month" );
+        SV * day = perl_mongo_call_reader( sv, "day" );
+        SV * hour = perl_mongo_call_reader( sv, "hour" );
+        SV * minute = perl_mongo_call_reader( sv, "minute" );
+        SV * second = perl_mongo_call_reader( sv, "second" );
+
+        t.tm_year   = SvIV( year ) - 1900;
+        t.tm_mon    = SvIV( month ) - 1;
+        t.tm_mday   = SvIV( day );
+        t.tm_hour   = SvIV( hour );
+        t.tm_min    = SvIV( minute );
+        t.tm_sec    = SvIV( second );
         t.tm_isdst  = -1;     // no dst/tz info in DateTime::Tiny
 
         epoch_secs = timegm( &t );
@@ -1254,6 +1261,13 @@ append_sv (bson_t * bson, const char * in_key, SV *sv, stackette *stack, int is_
         // no miliseconds in DateTime::Tiny, so just multiply by 1000
         epoch_ms = (int64_t)epoch_secs*1000;
         bson_append_date_time(bson, key, -1, epoch_ms);
+
+        SvREFCNT_dec( year );
+        SvREFCNT_dec( mon );
+        SvREFCNT_dec( day );
+        SvREFCNT_dec( hour );
+        SvREFCNT_dec( minute );
+        SvREFCNT_dec( second );
       }
       /* DBRef */
       else if (sv_isa(sv, "MongoDB::DBRef")) { 
