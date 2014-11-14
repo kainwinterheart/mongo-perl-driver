@@ -1249,7 +1249,7 @@ append_sv (bson_t * bson, const char * in_key, SV *sv, stackette *stack, int is_
         SV * second = perl_mongo_call_reader( sv, "second" );
 
         t.tm_year   = SvIV( year ) - 1900;
-        t.tm_mon    = SvIV( month ) - 1;
+        t.tm_mon    = SvIV( mon ) - 1;
         t.tm_mday   = SvIV( day );
         t.tm_hour   = SvIV( hour );
         t.tm_min    = SvIV( minute );
