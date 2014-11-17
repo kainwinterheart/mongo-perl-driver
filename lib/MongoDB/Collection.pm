@@ -336,6 +336,11 @@ sub aggregate {
     my @command = ( aggregate => $self->name, pipeline => $pipeline, %$opts );
     my $result = $db->_try_run_command( \@command );
 
+    unless( ref( $result ) ) {
+
+        die( $result );
+    }
+
     # if we got a cursor option then we need to construct a wonky cursor
     # object on our end and populate it with the first batch, since 
     # commands can't actually return cursors. 
