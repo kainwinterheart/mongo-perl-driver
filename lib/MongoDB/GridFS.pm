@@ -23,7 +23,7 @@ use version;
 our $VERSION = 'v0.706.0.1';
 
 use MongoDB::GridFS::File;
-use DateTime 0.78; # drops dependency on bug-prone Math::Round
+use DateTime;
 use Digest::MD5;
 use Moose;
 use namespace::clean -except => 'meta';

@@ -27,7 +27,7 @@ use MongoDB::Cursor;
 use MongoDB::BSON::Binary;
 use MongoDB::BSON::Regexp;
 use MongoDB::Error;
-use Authen::SCRAM::Client 0.003;
+use Authen::SCRAM::Client;
 use Digest::MD5;
 use MIME::Base64 qw/encode_base64 decode_base64/;
 use Tie::IxHash;

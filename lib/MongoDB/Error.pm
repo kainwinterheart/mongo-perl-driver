@@ -27,7 +27,7 @@ our $VERSION = 'v0.706.0.1';
 use Moose;
 use Moose::Meta::Class ();
 use MongoDB::_Types;
-use Exporter 5.57 qw/import/;
+use Exporter qw/import/;
 use namespace::clean -except => [ 'meta', 'import' ];
 
 my $ERROR_CODES;
