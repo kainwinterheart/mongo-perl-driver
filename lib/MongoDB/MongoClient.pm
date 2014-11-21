@@ -908,6 +908,9 @@ sub _authenticate_mongodb_cr {
              user => $username,
              nonce => $nonce,
              key => $digest);
+
+    local $MongoDB::BSON::looks_like_number = 0;
+
     $result = $db->run_command($login);
 
     return $result;
