@@ -176,86 +176,72 @@ void non_ssl_connect(mongo_link* link, int use_ipv6) {
   int sock, status, connected = 0;
   struct sockaddr_in addr;
 
-#ifdef WIN32
-  WORD version;
-  WSADATA wsaData;
-  int error;
-  u_long no = 0;
-  const char yes = 1;
+  // fprintf( stderr, "(non_ssl_connect) about to create socket, use_ipv6=%d\n", use_ipv6 );
 
-  version = MAKEWORD(2,2);
-  error = WSAStartup(version, &wsaData);
+  struct addrinfo hints, *servinfo, *p;
+  int rv;
 
-  if (error != 0) {
-    return;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = ( ( use_ipv6 == 1 ) ? AF_INET6 : AF_INET );
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_NUMERICSERV;
+
+  char port[10];
+  sprintf( port, "%d", link->master->port );
+  if ((rv = getaddrinfo(link->master->host, port, &hints, &servinfo)) != 0) {
+      fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+      return;
   }
 
-  // create socket
-  if( use_ipv6 == 1 ) {
-
-      sock = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-
-  } else {
-
-      sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  }
-
-  if (sock == INVALID_SOCKET) {
-    return;
-  }
-
-#else
   int yes = 1;
 
-  // create socket
-  if ((sock = socket(( ( use_ipv6 == 1 ) ? PF_INET6 : PF_INET ), SOCK_STREAM, IPPROTO_TCP)) == -1) {
-    croak("couldn't create socket: %s\n", strerror(errno));
-    return;
+  // loop through all the results and connect to the first we can
+  for(p = servinfo; p != NULL; p = p->ai_next) {
+      if ((sock = socket(p->ai_family, p->ai_socktype,
+              p->ai_protocol)) == -1) {
+
+          perror("socket");
+          continue;
+      }
+
+      setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &yes, INT_32);
+      setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &yes, INT_32);
+      set_timeout(sock, link->timeout);
+
+#ifdef WIN32
+      ioctlsocket(sock, FIONBIO, (u_long*)&yes);
+#else
+      fcntl(sock, F_SETFL, O_NONBLOCK);
+#endif
+
+      if (connect(sock, p->ai_addr, p->ai_addrlen) == -1) {
+#ifdef WIN32
+        errno = WSAGetLastError();
+
+        if (errno != WSAEINPROGRESS &&
+            errno != WSAEWOULDBLOCK)
+#else
+        if (errno != EINPROGRESS)
+#endif
+        {
+          close(sock);
+          perror("connect");
+          continue;
+        }
+      }
+
+      addr = *(struct sockaddr_in*)(p->ai_addr);
+
+      break; // if we get here, we must have connected successfully
   }
-#endif
 
-  // get addresses
-  if (!mongo_link_sockaddr(&addr, link->master->host, link->master->port, use_ipv6)) {
-#ifdef WIN32
-    closesocket(link->master->socket);
-#else
-    close(sock);
-#endif
-    return;
-  }
-
-  setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &yes, INT_32);
-  setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &yes, INT_32);
-  set_timeout(sock, link->timeout);
-
-#ifdef WIN32
-  ioctlsocket(sock, FIONBIO, (u_long*)&yes);
-#else
-  fcntl(sock, F_SETFL, O_NONBLOCK);
-#endif
-
-  // connect
-  status = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
-  if (status == -1) {
-    socklen_t size;
-
-#ifdef WIN32
-    errno = WSAGetLastError();
-
-    if (errno != WSAEINPROGRESS &&
-        errno != WSAEWOULDBLOCK)
-#else
-    if (errno != EINPROGRESS)
-#endif
-    {
-#ifdef WIN32
-        closesocket(link->master->socket);
-#else
-        close(sock);
-#endif
+  if (p == NULL) {
+      // looped off the end of the list with no connection
+      fprintf(stderr, "failed to connect\n");
       return;
-    }
+  }
 
+    // fprintf( stderr, "(non_ssl_connect) about to call mongo_link_timeout()\n" );
     if (!mongo_link_timeout(sock, link->timeout)) {
 #ifdef WIN32
         closesocket(link->master->socket);
@@ -265,8 +251,9 @@ void non_ssl_connect(mongo_link* link, int use_ipv6) {
       return;
     }
 
-    size = sizeof(addr);
+    socklen_t size = sizeof(addr);
 
+    // fprintf( stderr, "(non_ssl_connect) about to call getpeername()\n" );
     connected = getpeername(sock, (struct sockaddr*)&addr, &size);
     if (connected == -1){
 #ifdef WIN32
@@ -276,11 +263,8 @@ void non_ssl_connect(mongo_link* link, int use_ipv6) {
 #endif
       return;
     }
-  }
-  else if (status == 0) {
-    connected = 1;
-  }
 
+  // fprintf( stderr, "(non_ssl_connect) connected\n" );
 // reset flags
 #ifdef WIN32
   ioctlsocket(sock, FIONBIO, &no);
@@ -289,6 +273,8 @@ void non_ssl_connect(mongo_link* link, int use_ipv6) {
 #endif
   link->master->socket = sock;
   link->master->connected = 1;
+
+  freeaddrinfo(servinfo); // all done with this structure
 
   return;
 }
@@ -438,7 +424,7 @@ static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port, i
   }
 
   addr->sin_port = htons(port);
-  hostinfo = (struct hostent*)gethostbyname(host);
+  hostinfo = (struct hostent*)gethostbyname2(host, ( (use_ipv6 == 1) ? AF_INET6 : AF_INET ));
 
   if (!hostinfo) {
     return 0;
@@ -762,28 +748,63 @@ int perl_mongo_master(SV *link_sv, int auto_reconnect) {
 #ifdef MONGO_SSL
 // Establish a regular tcp connection
 void tcp_setup(mongo_link* link, int use_ipv6){
-  int error, handle;
-  struct hostent *host;
-  struct sockaddr_in server;
+  int sock;
 
-  host = gethostbyname (link->master->host);
-  handle = socket (( (use_ipv6 == 1) ? AF_INET6 : AF_INET ), SOCK_STREAM, 0);
-  if (handle == -1){
-    handle = 0;
-  }
-  else {
-    server.sin_family = ( (use_ipv6 == 1) ? AF_INET6 : AF_INET );
-    server.sin_port = htons (link->master->port);
-    server.sin_addr = *((struct in_addr *) host->h_addr);
-    bzero (&(server.sin_zero), 8);
+  struct addrinfo hints, *servinfo, *p;
+  int rv;
 
-    error = connect(handle, (struct sockaddr *) &server, sizeof (struct sockaddr));
-    if (error == -1){
-      handle = 0;
-    }
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = ( ( use_ipv6 == 1 ) ? AF_INET6 : AF_INET );
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_NUMERICSERV;
+
+  char port[10];
+  sprintf( port, "%d", link->master->port );
+  if ((rv = getaddrinfo(link->master->host, port, &hints, &servinfo)) != 0) {
+      fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+      link->master->socket = 0;
+      return;
   }
 
-  link->master->socket = handle;
+  int yes = 1;
+
+  // loop through all the results and connect to the first we can
+  for(p = servinfo; p != NULL; p = p->ai_next) {
+      if ((sock = socket(p->ai_family, p->ai_socktype,
+              p->ai_protocol)) == -1) {
+
+          perror("socket");
+          continue;
+      }
+
+      if (connect(sock, p->ai_addr, p->ai_addrlen) == -1) {
+#ifdef WIN32
+        errno = WSAGetLastError();
+
+        if (errno != WSAEINPROGRESS &&
+            errno != WSAEWOULDBLOCK)
+#else
+        if (errno != EINPROGRESS)
+#endif
+        {
+          close(sock);
+          perror("connect");
+          continue;
+        }
+      }
+
+      break; // if we get here, we must have connected successfully
+  }
+
+  if (p == NULL) {
+      // looped off the end of the list with no connection
+      fprintf(stderr, "failed to connect\n");
+      link->master->socket = 0;
+      return;
+  }
+
+  link->master->socket = sock;
+  freeaddrinfo(servinfo); // all done with this structure
 }
 
 // Disconnect & free connection struct
