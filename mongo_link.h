@@ -50,9 +50,9 @@
 #define OP_INSERT 2002
 #define OP_GET_BY_OID 2003
 #define OP_QUERY 2004
-#define OP_GET_MORE 2005 
+#define OP_GET_MORE 2005
 #define OP_DELETE 2006
-#define OP_KILL_CURSORS 2007 
+#define OP_KILL_CURSORS 2007
 
 // cursor flags
 #define CURSOR_NOT_FOUND 1
@@ -92,17 +92,17 @@
   APPEND_HEADER_NS(buf, ns, opts);
 
 #define CREATE_HEADER(buf, ns, opcode)          \
-  CREATE_RESPONSE_HEADER(buf, ns, 0, opcode);                    
+  CREATE_RESPONSE_HEADER(buf, ns, 0, opcode);
 
 #define APPEND_HEADER(buf, opts) buf.pos += INT_32;       \
   perl_mongo_serialize_int(&buf, header.request_id);                 \
   perl_mongo_serialize_int(&buf, header.response_to);                \
   perl_mongo_serialize_int(&buf, header.op);                         \
-  perl_mongo_serialize_int(&buf, opts);                                
+  perl_mongo_serialize_int(&buf, opts);
 
 #define APPEND_HEADER_NS(buf, ns, opts)                 \
   APPEND_HEADER(buf, opts);                             \
-  perl_mongo_serialize_string(&buf, ns, strlen(ns));              
+  perl_mongo_serialize_string(&buf, ns, strlen(ns));
 
 #define CREATE_BUF(size)                                \
   Newx(buf.start, size, char);                          \
@@ -182,12 +182,12 @@ int perl_mongo_master(SV *self, int auto_reconnect);
 void set_disconnected(SV *link_sv);
 
 //ssl
-void perl_mongo_connect( SV *client, mongo_link* link);
-void non_ssl_connect(mongo_link* link);
+void perl_mongo_connect( SV *client, mongo_link* link, int use_ipv6);
+void non_ssl_connect(mongo_link* link, int use_ipv6);
 
 #ifdef MONGO_SSL
-void tcp_setup(mongo_link* link);
-void ssl_connect(mongo_link* link);
+void tcp_setup(mongo_link* link, int use_ipv6);
+void ssl_connect(mongo_link* link, int use_ipv6));
 void ssl_disconnect (mongo_link *link);
 int ssl_send(void* link, const char* buffer, size_t len);
 int ssl_recv(void* link, const char* buffer, size_t len);

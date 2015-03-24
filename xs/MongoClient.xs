@@ -99,7 +99,7 @@ MODULE = MongoDB::MongoClient  PACKAGE = MongoDB::MongoClient
 
 PROTOTYPES: DISABLE
 
-void 
+void
 _init_conn(self, host, port, ssl)
     SV *self
     char *host
@@ -121,7 +121,7 @@ _init_conn(self, host, port, ssl)
     link->master->port = port;
     link->master->connected = 0;
     link->ssl = ssl;
-#ifdef MONGO_SSL 
+#ifdef MONGO_SSL
     link->ssl_handle = NULL;
     link->ssl_context = NULL;
 #endif
@@ -136,7 +136,7 @@ _init_conn(self, host, port, ssl)
     SvREFCNT_dec (auto_reconnect_sv);
     SvREFCNT_dec (timeout_sv);
 
-void 
+void
 _init_conn_holder(self, master)
     SV *self
     SV *master
@@ -151,7 +151,7 @@ _init_conn_holder(self, master)
     self_link->master = master_link->master;
     self_link->copy = 1;
     self_link->ssl = master_link->ssl;
-#ifdef MONGO_SSL 
+#ifdef MONGO_SSL
     self_link->ssl_handle = master_link->ssl_handle;
     self_link->ssl_context = master_link->ssl_context;
 #endif
@@ -163,15 +163,16 @@ connect (self)
      SV *self
    PREINIT:
      mongo_link *link = (mongo_link*)perl_mongo_get_ptr_from_instance(self, &connection_vtbl);
-     SV *username, *password, *sasl_flag;
+     SV *username, *password, *sasl_flag, *use_ipv6;
    CODE:
-    perl_mongo_connect(self, link);
+    use_ipv6 = perl_mongo_call_reader (self, "use_ipv6");
+    perl_mongo_connect(self, link, SvIV(use_ipv6));
 
      if (!link->master->connected) {
        croak ("couldn't connect to server %s:%d", link->master->host, link->master->port);
      }
 
-     // try legacy authentication if we have username and password but are not using SASL 
+     // try legacy authentication if we have username and password but are not using SASL
      username = perl_mongo_call_reader (self, "username");
      password = perl_mongo_call_reader (self, "password");
      sasl_flag = perl_mongo_call_reader( self, "sasl" );

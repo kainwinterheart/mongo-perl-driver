@@ -17,7 +17,7 @@
 #include "mongo_link.h"
 #include "perl_mongo.h"
 
-static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port);
+static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port, int use_ipv6);
 static int mongo_link_reader(mongo_link* link, void *dest, int len);
 
 /**
@@ -43,7 +43,7 @@ static void set_timeout(int socket, time_t timeout) {
 }
 
 #ifdef MONGO_SASL
-static void sasl_authenticate( SV *client, mongo_link *link ) { 
+static void sasl_authenticate( SV *client, mongo_link *link ) {
   Gsasl *ctx = NULL;
   Gsasl_session *session;
   SV *username, *mechanism, *conv_id;
@@ -54,40 +54,40 @@ static void sasl_authenticate( SV *client, mongo_link *link ) {
 
   /* check that we are connected before attempting a SASL conversation;
      otherwise we will end up in an infinite loop */
-  if ( ! link->master->connected ) { 
+  if ( ! link->master->connected ) {
     croak( "MongoDB: Could not begin SASL authentication without connection." );
   }
 
   mechanism = perl_mongo_call_method( client, "sasl_mechanism", 0, 0 );
-  if ( !SvOK( mechanism ) ) { 
+  if ( !SvOK( mechanism ) ) {
     croak( "MongoDB: Could not retrieve SASL mechanism from client object\n" );
   }
 
-  if ( strncmp( "PLAIN", SvPV_nolen( mechanism ), 5 ) == 0 ) { 
+  if ( strncmp( "PLAIN", SvPV_nolen( mechanism ), 5 ) == 0 ) {
     /* SASL PLAIN does not require a libgsasl conversation loop, so we can handle it elsewhere */
     perl_mongo_call_method( client, "_sasl_plain_authenticate", 0, 0 );
     return;
   }
 
-  if ( ( rc = gsasl_init( &ctx ) ) != GSASL_OK ) { 
-    croak( "MongoDB: Cannot initialize libgsasl (%d): %s\n", rc, gsasl_strerror(rc) );  
+  if ( ( rc = gsasl_init( &ctx ) ) != GSASL_OK ) {
+    croak( "MongoDB: Cannot initialize libgsasl (%d): %s\n", rc, gsasl_strerror(rc) );
   }
 
-  if ( ( rc = gsasl_client_start( ctx, SvPV_nolen( mechanism ), &session ) ) != GSASL_OK ) { 
+  if ( ( rc = gsasl_client_start( ctx, SvPV_nolen( mechanism ), &session ) ) != GSASL_OK ) {
     croak( "MongoDB: Cannot initialize SASL client (%d): %s\n", rc, gsasl_strerror(rc) );
   }
 
   username = perl_mongo_call_method( client, "username", 0, 0 );
-  if ( !SvOK( username ) ) { 
+  if ( !SvOK( username ) ) {
     croak( "MongoDB: Cannot start SASL session without username. Specify username in constructor\n" );
   }
- 
+
   gsasl_property_set( session, GSASL_SERVICE,  "mongodb" );
   gsasl_property_set( session, GSASL_HOSTNAME, link->master->host );
-  gsasl_property_set( session, GSASL_AUTHID,   SvPV_nolen( username ) ); 
+  gsasl_property_set( session, GSASL_AUTHID,   SvPV_nolen( username ) );
 
   rc = gsasl_step64( session, "", &p );
-  if ( ( rc != GSASL_OK ) && ( rc != GSASL_NEEDS_MORE ) ) { 
+  if ( ( rc != GSASL_OK ) && ( rc != GSASL_NEEDS_MORE ) ) {
     croak( "MongoDB: No data from GSSAPI. Did you run kinit?\n" );
   }
 
@@ -98,27 +98,27 @@ static void sasl_authenticate( SV *client, mongo_link *link ) {
 
   result = (HV *)SvRV( perl_mongo_call_method( client, "_sasl_start", 0, 2, newSVpv( out_buf, 0 ), mechanism ) );
 
-#if 0  
+#if 0
   fprintf( stderr, "result conv id = [%s]\n", SvPV_nolen( *hv_fetch( result, "conversationId", 14, FALSE ) ) );
   fprintf( stderr, "result payload = [%s]\n", SvPV_nolen( *hv_fetch( result, "payload",         7, FALSE ) ) );
 #endif
 
   buf = SvPV_nolen( *hv_fetch( result, "payload", 7, FALSE ) );
-  conv_id = *hv_fetch( result, "conversationId", 14, FALSE ); 
- 
-  do { 
+  conv_id = *hv_fetch( result, "conversationId", 14, FALSE );
+
+  do {
     rc = gsasl_step64( session, buf, &p );
     if ( ( rc != GSASL_OK ) && ( rc != GSASL_NEEDS_MORE ) ) {
       croak( "MongoDB: SASL step error (%d): %s\n", rc, gsasl_strerror(rc) );
     }
 
-    if ( ! strncpy( out_buf, p, 8192 ) ) { 
+    if ( ! strncpy( out_buf, p, 8192 ) ) {
       croak( "MongoDB: Unable to copy SASL output buffer\n" );
     }
     gsasl_free( p );
 
     result = (HV *)SvRV( perl_mongo_call_method( client, "_sasl_continue", 0, 2, newSVpv( out_buf, 0 ), conv_id ) );
-#if 0 
+#if 0
     fprintf( stderr, "result conv id = [%s]\n", SvPV_nolen( *hv_fetch( result, "conversationId", 14, FALSE ) ) );
     fprintf( stderr, "result payload = [%s]\n", SvPV_nolen( *hv_fetch( result, "payload",         7, FALSE ) ) );
 #endif
@@ -127,7 +127,7 @@ static void sasl_authenticate( SV *client, mongo_link *link ) {
 
   } while( rc == GSASL_NEEDS_MORE );
 
-  if ( rc != GSASL_OK ) { 
+  if ( rc != GSASL_OK ) {
     croak( "MongoDB: SASL Authentication error (%d): %s\n", rc, gsasl_strerror(rc) );
   }
 
@@ -136,19 +136,19 @@ static void sasl_authenticate( SV *client, mongo_link *link ) {
 }
 #endif  /* MONGO_SASL */
 
-void perl_mongo_connect(SV *client, mongo_link* link) {
+void perl_mongo_connect(SV *client, mongo_link* link, int use_ipv6) {
   SV* sasl_flag;
 
 #ifdef MONGO_SSL
   if(link->ssl){
-    ssl_connect(link);
+    ssl_connect(link, use_ipv6);
     link->sender = ssl_send;
     link->receiver = ssl_recv;
     return;
   }
 #endif
 
-  non_ssl_connect(link);
+  non_ssl_connect(link, use_ipv6);
   link->sender = non_ssl_send;
   link->receiver = non_ssl_recv;
 
@@ -161,9 +161,9 @@ void perl_mongo_connect(SV *client, mongo_link* link) {
       croak( "MongoDB: sasl => 1 specified, but this driver was not compiled with SASL support\n" );
 #endif
   }
-  
+
   SvREFCNT_dec(sasl_flag);
-  
+
 }
 
 /*
@@ -172,7 +172,7 @@ void perl_mongo_connect(SV *client, mongo_link* link) {
  * Note: this cannot return 0 on failure, because reconnecting sometimes makes
  * the fh 0 (briefly).
  */
-void non_ssl_connect(mongo_link* link) {
+void non_ssl_connect(mongo_link* link, int use_ipv6) {
   int sock, status, connected = 0;
   struct sockaddr_in addr;
 
@@ -191,7 +191,15 @@ void non_ssl_connect(mongo_link* link) {
   }
 
   // create socket
-  sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if( use_ipv6 == 1 ) {
+
+      sock = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+
+  } else {
+
+      sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  }
+
   if (sock == INVALID_SOCKET) {
     return;
   }
@@ -200,14 +208,14 @@ void non_ssl_connect(mongo_link* link) {
   int yes = 1;
 
   // create socket
-  if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+  if ((sock = socket(( ( use_ipv6 == 1 ) ? PF_INET6 : PF_INET ), SOCK_STREAM, IPPROTO_TCP)) == -1) {
     croak("couldn't create socket: %s\n", strerror(errno));
     return;
   }
 #endif
 
   // get addresses
-  if (!mongo_link_sockaddr(&addr, link->master->host, link->master->port)) {
+  if (!mongo_link_sockaddr(&addr, link->master->host, link->master->port, use_ipv6)) {
 #ifdef WIN32
     closesocket(link->master->socket);
 #else
@@ -287,8 +295,8 @@ void non_ssl_connect(mongo_link* link) {
 
 #ifdef MONGO_SSL
 // Establish a connection using an SSL layer
-void ssl_connect(mongo_link* link) {
-  tcp_setup(link);
+void ssl_connect(mongo_link* link, int use_ipv6) {
+  tcp_setup(link, use_ipv6);
 
   if (link->master->socket){
     // Register the error strings for libcrypto & libssl
@@ -417,10 +425,18 @@ static int mongo_link_timeout(int sock, time_t to) {
   return 1;
 }
 
-static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port) {
+static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port, int use_ipv6) {
   struct hostent *hostinfo;
 
-  addr->sin_family = AF_INET;
+  if( use_ipv6 == 1 ) {
+
+      addr->sin_family = AF_INET6;
+
+  } else {
+
+      addr->sin_family = AF_INET;
+  }
+
   addr->sin_port = htons(port);
   hostinfo = (struct hostent*)gethostbyname(host);
 
@@ -745,18 +761,18 @@ int perl_mongo_master(SV *link_sv, int auto_reconnect) {
 
 #ifdef MONGO_SSL
 // Establish a regular tcp connection
-void tcp_setup(mongo_link* link){
+void tcp_setup(mongo_link* link, int use_ipv6){
   int error, handle;
   struct hostent *host;
   struct sockaddr_in server;
 
   host = gethostbyname (link->master->host);
-  handle = socket (AF_INET, SOCK_STREAM, 0);
+  handle = socket (( (use_ipv6 == 1) ? AF_INET6 : AF_INET ), SOCK_STREAM, 0);
   if (handle == -1){
     handle = 0;
   }
   else {
-    server.sin_family = AF_INET;
+    server.sin_family = ( (use_ipv6 == 1) ? AF_INET6 : AF_INET );
     server.sin_port = htons (link->master->port);
     server.sin_addr = *((struct in_addr *) host->h_addr);
     bzero (&(server.sin_zero), 8);

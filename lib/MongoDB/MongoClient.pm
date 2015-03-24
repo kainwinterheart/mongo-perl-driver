@@ -41,11 +41,11 @@ use MongoDB::_Types;
 use namespace::clean -except => 'meta';
 
 use constant {
-    PRIMARY             => 0, 
+    PRIMARY             => 0,
     SECONDARY           => 1,
     PRIMARY_PREFERRED   => 2,
     SECONDARY_PREFERRED => 3,
-    NEAREST             => 4 
+    NEAREST             => 4
 };
 
 use constant _READPREF_MODENAMES => ['primary',
@@ -64,6 +64,12 @@ has host => (
     isa      => 'Str',
     required => 1,
     default  => 'mongodb://localhost:27017',
+);
+
+has use_ipv6 => (
+    is       => 'rw',
+    isa      => 'Bool',
+    default  => 0,
 );
 
 has w => (
@@ -114,7 +120,7 @@ has _readpref_pingfreq_sec => (
     is       => 'ro',
     isa      => 'Int',
     required => 1,
-    default  => 5 
+    default  => 5
 );
 
 
@@ -218,14 +224,14 @@ has ssl => (
     default  => 0,
 );
 
-has sasl => ( 
+has sasl => (
     is       => 'ro',
     isa      => 'Bool',
     required => 1,
     default  => 0
 );
 
-has sasl_mechanism => ( 
+has sasl_mechanism => (
     is       => 'ro',
     isa      => 'SASLMech',
     required => 1,
@@ -275,7 +281,7 @@ has inflate_dbrefs => (
     default   => 1
 );
 
-has inflate_regexps => ( 
+has inflate_regexps => (
     is        => 'rw',
     isa       => 'Bool',
     required  => 0,
@@ -283,7 +289,7 @@ has inflate_regexps => (
 );
 
 # attributes for keeping track of client and server wire protocol versions
-has min_wire_version => ( 
+has min_wire_version => (
     is        => 'ro',
     isa       => 'Int',
     default   => 0
@@ -295,7 +301,7 @@ has max_wire_version => (
     default   => 3
 );
 
-has _use_write_cmd => ( 
+has _use_write_cmd => (
     is        => 'ro',
     isa       => 'Bool',
     required  => 1,
@@ -350,8 +356,15 @@ sub BUILD {
     # a simple single server is special-cased (so we don't recurse forever)
     if (@pairs == 1 && !$self->find_master) {
         my @hp = split ":", $pairs[0];
+        my $port = pop( @hp );
+        my $host = join( ':', @hp );
 
-        $self->_init_conn($hp[0], $hp[1], $self->ssl);
+        if( scalar( @hp ) > 1 ) {
+
+            $self -> use_ipv6( 1 );
+        }
+
+        $self->_init_conn($host, $port, $self->ssl);
         if ($self->auto_connect) {
             $self->connect;
         }
@@ -451,7 +464,7 @@ sub _parse_connection_string {
 
         $result{hostpairs} = 'localhost' unless $result{hostpairs};
         $result{hostpairs} = [
-            map { @_ = split ':', $_; _unescape_all($_[0]).":"._unescape_all($_[1]) }
+            map { my @hp = split ':', $_; my $port = pop(@hp);_unescape_all(join(":",@hp)).":"._unescape_all($port) }
             map { $_ .= ':27017' unless $_ =~ /:/ ; $_ } split ',', $result{hostpairs}
         ];
 
@@ -478,7 +491,7 @@ sub _update_server_attributes {
     $self->_check_wire_version;
 }
 
-sub _build__use_write_cmd { 
+sub _build__use_write_cmd {
     my $self = shift;
 
     # find out if we support write commands
@@ -561,7 +574,7 @@ sub _get_any_connection {
     while ((my $key, my $value) = each(%{$self->_servers})) {
         my $conn = $self->_get_a_specific_connection($key);
         if ($conn) {
-            # force a reset of the iterator 
+            # force a reset of the iterator
             my $reset = keys %{$self->_servers};
             return $conn;
         }
@@ -589,13 +602,13 @@ sub get_master {
                 $conn->get_database($self->db_name)->_try_run_command({"ismaster" => 1})
             };
 
-            if ( !$master ) { 
+            if ( !$master ) {
                 undef $conn;
                 next;
             };
 
             # msg field from ismaster command will
-            # be set if in a sharded environment 
+            # be set if in a sharded environment
             $self->_is_mongos(1) if $master->{'msg'};
 
             # if this is a replica set & list of hosts is different, then update
@@ -658,7 +671,7 @@ sub read_preference {
 
     croak "Missing read preference mode" if @_ < 2;
     croak "Unrecognized read preference mode: $mode" if $mode < 0 || $mode > 4;
-    croak "NEAREST read preference mode not supported" if $mode == MongoDB::MongoClient->NEAREST; 
+    croak "NEAREST read preference mode not supported" if $mode == MongoDB::MongoClient->NEAREST;
     if (!$self->_is_mongos && (!$self->find_master || keys %{$self->_servers} < 2)) {
         croak "Read preference must be used with a replica set; is find_master false?";
     }
@@ -859,7 +872,7 @@ sub rs_refresh {
         }
         $self->get_master($any_conn) if $any_conn;
     }
-   
+
     $self->repin if $repin_required;
     $self->ts(time());
 }
@@ -946,21 +959,21 @@ sub _authenticate_scram_sha_1 {
 
 sub fsync {
     my ($self, $args) = @_;
-	
-	$args ||= {};
+
+    $args ||= {};
 
     # Pass this in as array-ref to ensure that 'fsync => 1' is the first argument.
     return $self->get_database('admin')->run_command([fsync => 1, %$args]);
 }
 
-sub fsync_unlock { 
+sub fsync_unlock {
     my ($self) = @_;
-	
+
     # Have to fetch from a special collection to unlock.
     return $self->get_database('admin')->get_collection('$cmd.sys.unlock')->find_one();
 }
 
-sub _w_want_safe { 
+sub _w_want_safe {
     my ( $self ) = @_;
 
     my $w = $self->w;
@@ -975,7 +988,7 @@ sub _sasl_check {
     die "Invalid SASL response document from server:"
         unless ref $res eq 'HASH';
 
-    if ( $res->{ok} != 1 ) { 
+    if ( $res->{ok} != 1 ) {
         croak "SASL authentication error: $res->{errmsg}";
     }
 
@@ -1016,29 +1029,29 @@ sub _sasl_continue {
 }
 
 
-sub _sasl_plain_authenticate { 
+sub _sasl_plain_authenticate {
     my ( $self ) = @_;
 
     my $username = defined $self->username ? $self->username : "";
-    my $password = defined $self->password ? $self->password : ""; 
+    my $password = defined $self->password ? $self->password : "";
 
     my $auth_bytes = encode( "UTF-8", "\x00" . $username . "\x00" . $password );
-    my $payload = MongoDB::BSON::Binary->new( data => $auth_bytes ); 
+    my $payload = MongoDB::BSON::Binary->new( data => $auth_bytes );
 
-    $self->_sasl_start( $payload, "PLAIN" );    
-} 
+    $self->_sasl_start( $payload, "PLAIN" );
+}
 
 
-sub _check_wire_version { 
+sub _check_wire_version {
     my ( $self ) = @_;
     # check our wire protocol version compatibility
-    
+
     my $master = $self->get_database( $self->db_name )->_try_run_command( { ismaster => 1 } );
     $master->{minWireVersion} ||= 0;
     $master->{maxWireVersion} ||= 0;
 
     if (    ( $master->{minWireVersion} > $self->max_wire_version )
-            or ( $master->{maxWireVersion} < $self->min_wire_version ) ) { 
+            or ( $master->{maxWireVersion} < $self->min_wire_version ) ) {
         die "Incompatible wire protocol version. This version of the MongoDB driver is not compatible with the server. You probably need to upgrade this library.";
     }
 
@@ -1147,22 +1160,22 @@ using the C<db_name> property, it will be used instead.
 
 =attr w
 
-The client I<write concern>. 
+The client I<write concern>.
 
 =over 4
 
 =item * C<-1> Errors ignored. Do not use this.
 
-=item * C<0> Unacknowledged. MongoClient will B<NOT> wait for an acknowledgment that 
+=item * C<0> Unacknowledged. MongoClient will B<NOT> wait for an acknowledgment that
 the server has received and processed the request. Older documentation may refer
 to this as "fire-and-forget" mode. You must call C<getLastError> manually to check
 if a request succeeds. This option is not recommended.
 
-=item * C<1> Acknowledged. This is the default. MongoClient will wait until the 
+=item * C<1> Acknowledged. This is the default. MongoClient will wait until the
 primary MongoDB acknowledges the write.
 
-=item * C<2> Replica acknowledged. MongoClient will wait until at least two 
-replicas (primary and one secondary) acknowledge the write. You can set a higher 
+=item * C<2> Replica acknowledged. MongoClient will wait until at least two
+replicas (primary and one secondary) acknowledge the write. You can set a higher
 number for more replicas.
 
 =item * C<all> All replicas acknowledged.
@@ -1171,10 +1184,10 @@ number for more replicas.
 
 =back
 
-In MongoDB v2.0+, you can "tag" replica members. With "tagging" you can specify a 
+In MongoDB v2.0+, you can "tag" replica members. With "tagging" you can specify a
 new "getLastErrorMode" where you can create new
-rules on how your data is replicated. To used you getLastErrorMode, you pass in the 
-name of the mode to the C<w> parameter. For more information see: 
+rules on how your data is replicated. To used you getLastErrorMode, you pass in the
+name of the mode to the C<w> parameter. For more information see:
 http://www.mongodb.org/display/DOCS/Data+Center+Awareness
 
 =attr wtimeout
@@ -1189,8 +1202,8 @@ See C<w> above for more information.
 =attr j
 
 If true, the client will block until write operations have been committed to the
-server's journal. Prior to MongoDB 2.6, this option was ignored if the server was 
-running without journaling. Starting with MongoDB 2.6, write operations will fail 
+server's journal. Prior to MongoDB 2.6, this option was ignored if the server was
+running without journaling. Starting with MongoDB 2.6, write operations will fail
 if this option is used when the server is running without journaling.
 
 =attr auto_reconnect
@@ -1334,18 +1347,18 @@ in order to be consistent with the MongoDB server, which now uses Cyrus.
 
 This attribute is experimental.
 
-This specifies the SASL mechanism to use for authentication with a MongoDB server. (See L</sasl>.) 
+This specifies the SASL mechanism to use for authentication with a MongoDB server. (See L</sasl>.)
 The default is GSSAPI. The supported SASL mechanisms are:
 
 =over 4
 
 =item * C<GSSAPI>. This is the default. GSSAPI will attempt to authenticate against Kerberos
-for MongoDB Enterprise 2.4+. You must run your program from within a C<kinit> session and set 
-the C<username> attribute to the Kerberos principal name, e.g. C<user@EXAMPLE.COM>. 
+for MongoDB Enterprise 2.4+. You must run your program from within a C<kinit> session and set
+the C<username> attribute to the Kerberos principal name, e.g. C<user@EXAMPLE.COM>.
 
 =item * C<PLAIN>. The SASL PLAIN mechanism will attempt to authenticate against LDAP for
 MongoDB Enterprise 2.6+. Because the password is not encrypted, you should only use this
-mechanism over a secure connection. You must set the C<username> and C<password> attributes 
+mechanism over a secure connection. You must set the C<username> and C<password> attributes
 to your LDAP credentials.
 
 =back
@@ -1358,13 +1371,13 @@ rather than an object.
 
 =attr inflate_dbrefs
 
-Controls whether L<DBRef|http://docs.mongodb.org/manual/applications/database-references/#dbref>s 
+Controls whether L<DBRef|http://docs.mongodb.org/manual/applications/database-references/#dbref>s
 are automatically inflated into L<MongoDB::DBRef> objects. Defaults to true.
 Set this to C<0> if you don't want to auto-inflate them.
 
 =attr inflate_regexps
 
-Controls whether regular expressions stored in MongoDB are inflated into L<MongoDB::BSON::Regexp> objects instead of native Perl Regexps. The default is false. This can be dangerous, since the JavaScript regexps used internally by MongoDB are of a different dialect than Perl's. The default for this attribute may become true in future versions of the driver. 
+Controls whether regular expressions stored in MongoDB are inflated into L<MongoDB::BSON::Regexp> objects instead of native Perl Regexps. The default is false. This can be dangerous, since the JavaScript regexps used internally by MongoDB are of a different dialect than Perl's. The default for this attribute may become true in future versions of the driver.
 
 =method connect
 
@@ -1424,7 +1437,7 @@ The fsync operation is synchronous by default, to run fsync asynchronously, use 
 
     $client->fsync({async => 1});
 
-The primary use of fsync is to lock the database during backup operations. This will flush all data to the data storage layer and block all write operations until you unlock the database. Note: you can still read while the database is locked. 
+The primary use of fsync is to lock the database during backup operations. This will flush all data to the data storage layer and block all write operations until you unlock the database. Note: you can still read while the database is locked.
 
     $conn->fsync({lock => 1});
 
@@ -1432,7 +1445,7 @@ The primary use of fsync is to lock the database during backup operations. This 
 
     $conn->fsync_unlock();
 
-Unlocks a database server to allow writes and reverses the operation of a $conn->fsync({lock => 1}); operation. 
+Unlocks a database server to allow writes and reverses the operation of a $conn->fsync({lock => 1}); operation.
 
 =method read_preference
 
@@ -1455,7 +1468,7 @@ Chooses a replica set member to which this connection should route read operatio
 according to the read preference that has been set via L<MongoDB::MongoClient/read_preference>
 or L<MongoDB::Cursor/read_preference>. This method is called automatically
 when the read preference or replica set state changes, and generally does not
-need to be called by application code. 
+need to be called by application code.
 
 =method rs_refresh
 
@@ -1466,4 +1479,3 @@ then ping all replica set members. Calls L<MongoDB::MongoClient/repin> if
 a previously reachable node is now unreachable, or a previously unreachable
 node is now reachable. This method is called automatically before communicating
 with the server, and therefore should not generally be called by client code.
-
