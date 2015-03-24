@@ -66,12 +66,6 @@ has host => (
     default  => 'mongodb://localhost:27017',
 );
 
-has use_ipv6 => (
-    is       => 'rw',
-    isa      => 'Bool',
-    default  => 0,
-);
-
 has w => (
     is      => 'rw',
     isa     => 'Int|Str',
@@ -358,11 +352,6 @@ sub BUILD {
         my @hp = split ":", $pairs[0];
         my $port = pop( @hp );
         my $host = join( ':', @hp );
-
-        if( scalar( @hp ) > 1 ) {
-
-            $self -> use_ipv6( 1 );
-        }
 
         $self->_init_conn($host, $port, $self->ssl);
         if ($self->auto_connect) {

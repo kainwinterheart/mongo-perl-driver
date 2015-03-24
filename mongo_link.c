@@ -17,7 +17,6 @@
 #include "mongo_link.h"
 #include "perl_mongo.h"
 
-static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port, int use_ipv6);
 static int mongo_link_reader(mongo_link* link, void *dest, int len);
 
 /**
@@ -136,19 +135,19 @@ static void sasl_authenticate( SV *client, mongo_link *link ) {
 }
 #endif  /* MONGO_SASL */
 
-void perl_mongo_connect(SV *client, mongo_link* link, int use_ipv6) {
+void perl_mongo_connect(SV *client, mongo_link* link) {
   SV* sasl_flag;
 
 #ifdef MONGO_SSL
   if(link->ssl){
-    ssl_connect(link, use_ipv6);
+    ssl_connect(link);
     link->sender = ssl_send;
     link->receiver = ssl_recv;
     return;
   }
 #endif
 
-  non_ssl_connect(link, use_ipv6);
+  non_ssl_connect(link);
   link->sender = non_ssl_send;
   link->receiver = non_ssl_recv;
 
@@ -172,17 +171,17 @@ void perl_mongo_connect(SV *client, mongo_link* link, int use_ipv6) {
  * Note: this cannot return 0 on failure, because reconnecting sometimes makes
  * the fh 0 (briefly).
  */
-void non_ssl_connect(mongo_link* link, int use_ipv6) {
+void non_ssl_connect(mongo_link* link) {
   int sock, status, connected = 0;
   struct sockaddr_in addr;
 
-  // fprintf( stderr, "(non_ssl_connect) about to create socket, use_ipv6=%d\n", use_ipv6 );
+  // fprintf( stderr, "(non_ssl_connect) about to create socket=%d\n" );
 
   struct addrinfo hints, *servinfo, *p;
   int rv;
 
   memset(&hints, 0, sizeof hints);
-  hints.ai_family = ( ( use_ipv6 == 1 ) ? AF_INET6 : AF_INET );
+  hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_NUMERICSERV;
 
@@ -281,8 +280,8 @@ void non_ssl_connect(mongo_link* link, int use_ipv6) {
 
 #ifdef MONGO_SSL
 // Establish a connection using an SSL layer
-void ssl_connect(mongo_link* link, int use_ipv6) {
-  tcp_setup(link, use_ipv6);
+void ssl_connect(mongo_link* link) {
+  tcp_setup(link);
 
   if (link->master->socket){
     // Register the error strings for libcrypto & libssl
@@ -410,35 +409,6 @@ static int mongo_link_timeout(int sock, time_t to) {
 
   return 1;
 }
-
-static int mongo_link_sockaddr(struct sockaddr_in *addr, char *host, int port, int use_ipv6) {
-  struct hostent *hostinfo;
-
-  if( use_ipv6 == 1 ) {
-
-      addr->sin_family = AF_INET6;
-
-  } else {
-
-      addr->sin_family = AF_INET;
-  }
-
-  addr->sin_port = htons(port);
-  hostinfo = (struct hostent*)gethostbyname2(host, ( (use_ipv6 == 1) ? AF_INET6 : AF_INET ));
-
-  if (!hostinfo) {
-    return 0;
-  }
-
-#ifdef WIN32
-  addr->sin_addr.s_addr = ((struct in_addr*)(hostinfo->h_addr))->s_addr;
-#else
-  addr->sin_addr = *((struct in_addr*)hostinfo->h_addr);
-#endif
-
-  return 1;
-}
-
 
 /*
  * Sends a message to the MongoDB server
@@ -747,14 +717,14 @@ int perl_mongo_master(SV *link_sv, int auto_reconnect) {
 
 #ifdef MONGO_SSL
 // Establish a regular tcp connection
-void tcp_setup(mongo_link* link, int use_ipv6){
+void tcp_setup(mongo_link* link){
   int sock;
 
   struct addrinfo hints, *servinfo, *p;
   int rv;
 
   memset(&hints, 0, sizeof hints);
-  hints.ai_family = ( ( use_ipv6 == 1 ) ? AF_INET6 : AF_INET );
+  hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_NUMERICSERV;
 

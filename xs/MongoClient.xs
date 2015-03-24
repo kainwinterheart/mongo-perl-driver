@@ -163,10 +163,9 @@ connect (self)
      SV *self
    PREINIT:
      mongo_link *link = (mongo_link*)perl_mongo_get_ptr_from_instance(self, &connection_vtbl);
-     SV *username, *password, *sasl_flag, *use_ipv6;
+     SV *username, *password, *sasl_flag;
    CODE:
-    use_ipv6 = perl_mongo_call_reader (self, "use_ipv6");
-    perl_mongo_connect(self, link, SvIV(use_ipv6));
+    perl_mongo_connect(self, link);
 
      if (!link->master->connected) {
        croak ("couldn't connect to server %s:%d", link->master->host, link->master->port);
